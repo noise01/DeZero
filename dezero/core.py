@@ -44,6 +44,9 @@ class Variable:
         self.creator = f
         self.generation = f.generation + 1
 
+    def clear_grad(self) -> None:
+        self.grad = None
+
     def backward(self, retain_grad=False, create_graph=False) -> None:
         if self.grad is None:
             self.grad = Variable(np.ones_like(self.data))
@@ -80,9 +83,6 @@ class Variable:
                 if not retain_grad:
                     for y in f.outputs:
                         y().grad = None
-
-    def clear_grad(self) -> None:
-        self.grad = None
 
     def reshape(self, *shape: tuple) -> Variable:
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):

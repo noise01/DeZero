@@ -38,6 +38,13 @@ class Variable:
         self.creator: Function = None
         self.generation = 0
 
+    def set_creator(self, f: Function) -> None:
+        self.creator = f
+        self.generation = f.generation + 1
+
+    def clear_grad(self) -> None:
+        self.grad = None
+
     def backward(self, retain_grad=False) -> None:
         if self.grad is None:
             self.grad = np.ones_like(self.data)
@@ -72,13 +79,6 @@ class Variable:
             if not retain_grad:
                 for y in f.outputs:
                     y().grad = None
-
-    def clear_grad(self) -> None:
-        self.grad = None
-
-    def set_creator(self, f: Function) -> None:
-        self.creator = f
-        self.generation = f.generation + 1
 
     @property
     def shape(self) -> tuple:
