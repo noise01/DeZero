@@ -156,6 +156,10 @@ class Variable:
         return pow(self, other)
 
 
+class Parameter(Variable):
+    pass
+
+
 class Function:
     def __call__(self, *inputs: Variable) -> list[Variable] | Variable:
         inputs = [as_variable(x) for x in inputs]

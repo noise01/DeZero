@@ -48,6 +48,19 @@ def tanh(x: Variable) -> Variable:
     return Tanh()(x)
 
 
+class Exp(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        return np.exp(x)
+
+    def backward(self, gy: Variable) -> Variable:
+        y = self.outputs[0]()
+        return gy * y
+
+
+def exp(x: Variable) -> Variable:
+    return Exp()(x)
+
+
 class Reshape(Function):
     def __init__(self, shape: tuple) -> None:
         self.shape = shape
@@ -153,6 +166,55 @@ class MatMul(Function):
 
 def matmul(x: Variable, W: Variable) -> Variable:
     return MatMul()(x, W)
+
+
+class Linear(Function):
+    def forward(self, x: np.ndarray, W: np.ndarray, b: np.ndarray) -> np.ndarray:
+        y = x.dot(W)
+        if b is not None:
+            y += b
+        return y
+
+    def backward(self, gy: Variable) -> tuple[Variable]:
+        x, W, b = self.inputs
+        gb = None if b.data is None else sum_to(gy, b.shape)
+        gx = matmul(gy, W.T)
+        gW = matmul(x.T, gy)
+        return gx, gW, gb
+
+
+def linear(x: Variable, W: Variable, b: Variable = None):
+    return Linear()(x, W, b)
+
+
+def linear_simple(x: Variable, W: Variable, b: Variable = None):
+    x, W = as_variable(x), as_variable(W)
+    t = matmul(x, W)
+    if b is None:
+        return t
+
+    y = t + b
+    t.data = None
+    return y
+
+
+class Sigmoid(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        x = as_variable(x)
+        return 1 / (1 + exp(-x))
+
+    def backward(self, gy: Variable) -> Variable:
+        y = self.outputs[0]()
+        return gy * y * (1 - y)
+
+
+def sigmoid(x: Variable) -> Variable:
+    return Sigmoid()(x)
+
+
+def sigmoid_simple(x: Variable) -> Variable:
+    x = as_variable(x)
+    return 1 / (1 + exp(-x))
 
 
 class MeanSquaredError(Function):
