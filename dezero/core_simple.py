@@ -10,23 +10,33 @@ class Config:
     enable_backprop = True
 
 
+@contextlib.contextmanager
+def using_config(name: str, value: bool) -> None:
+    old_value = getattr(Config, name)
+    setattr(Config, name, value)
+    try:
+        yield
+    finally:
+        setattr(Config, name, old_value)
+
+
+def no_grad() -> None:
+    return using_config("enable_backprop", False)
+
+
 class Variable:
     __array_priority__ = 200
 
-    def __init__(self, data: np.ndarray, name=None) -> None:
+    def __init__(self, data: np.ndarray, name: str = None) -> None:
         if data is not None:
             if not isinstance(data, np.ndarray):
                 raise TypeError("{} is not supported".format(type(data)))
 
         self.data = data
-        self.name: str = name
+        self.name = name
         self.grad: np.ndarray = None
         self.creator: Function = None
         self.generation = 0
-
-    def set_creator(self, f: Function) -> None:
-        self.creator = f
-        self.generation = f.generation + 1
 
     def backward(self, retain_grad=False) -> None:
         if self.grad is None:
@@ -66,9 +76,17 @@ class Variable:
     def clear_grad(self) -> None:
         self.grad = None
 
+    def set_creator(self, f: Function) -> None:
+        self.creator = f
+        self.generation = f.generation + 1
+
     @property
     def shape(self) -> tuple:
         return self.data.shape
+
+    @property
+    def ndim(self) -> int:
+        return self.data.ndim
 
     @property
     def size(self) -> int:
@@ -118,6 +136,18 @@ class Variable:
         return pow(self, other)
 
 
+def as_array(x: Any) -> np.ndarray:
+    if np.isscalar(x):
+        return np.array(x)
+    return x
+
+
+def as_variable(obj: Variable | np.ndarray) -> Variable:
+    if isinstance(obj, Variable):
+        return obj
+    return Variable(obj)
+
+
 class Function:
     def __call__(self, *inputs: Variable) -> list[Variable] | Variable:
         inputs = [as_variable(x) for x in inputs]
@@ -152,6 +182,11 @@ class Add(Function):
         return gy, gy
 
 
+def add(x0: Variable, x1: Variable) -> Variable:
+    x1 = as_array(x1)
+    return Add()(x0, x1)
+
+
 class Mul(Function):
     def forward(self, x0: np.ndarray, x1: np.ndarray) -> np.ndarray:
         return x0 * x1
@@ -159,6 +194,11 @@ class Mul(Function):
     def backward(self, gy: np.ndarray) -> tuple[np.ndarray]:
         x0, x1 = self.inputs[0].data, self.inputs[1].data
         return gy * x1, gy * x0
+
+
+def mul(x0: Variable, x1: Variable) -> Variable:
+    x1 = as_array(x1)
+    return Mul()(x0, x1)
 
 
 class Neg(Function):
@@ -169,12 +209,26 @@ class Neg(Function):
         return -gy
 
 
+def neg(x: Variable) -> Variable:
+    return Neg()(x)
+
+
 class Sub(Function):
     def forward(self, x0: np.ndarray, x1: np.ndarray) -> np.ndarray:
         return x0 - x1
 
     def backward(self, gy: np.ndarray) -> tuple[np.ndarray]:
         return gy, -gy
+
+
+def sub(x0: Variable, x1: Variable) -> Variable:
+    x1 = as_array(x1)
+    return Sub()(x0, x1)
+
+
+def rsub(x0: Variable, x1: Variable) -> Variable:
+    x1 = as_array(x1)
+    return Sub()(x1, x0)
 
 
 class Div(Function):
@@ -186,6 +240,16 @@ class Div(Function):
         gx0 = gy / x1
         gx1 = gy * (-x0 / x1**2)
         return gx0, gx1
+
+
+def div(x0: Variable, x1: Variable) -> Variable:
+    x1 = as_array(x1)
+    return Div()(x0, x1)
+
+
+def rdiv(x0: Variable, x1: Variable) -> Variable:
+    x1 = as_array(x1)
+    return Div()(x1, x0)
 
 
 class Pow(Function):
@@ -201,76 +265,5 @@ class Pow(Function):
         return gy * c * x ** (c - 1)
 
 
-@contextlib.contextmanager
-def using_config(name: str, value: bool) -> None:
-    old_value = getattr(Config, name)
-    setattr(Config, name, value)
-    try:
-        yield
-    finally:
-        setattr(Config, name, old_value)
-
-
-# no type hint
-def no_grad():
-    print(type(using_config("enable_backprop", False)))
-    return using_config("enable_backprop", False)
-
-
-# check type hint
-def as_array(x: Any) -> np.ndarray:
-    if np.isscalar(x):
-        return np.array(x)
-    return x
-
-
-def as_variable(obj: Variable | np.ndarray) -> Variable:
-    if isinstance(obj, Variable):
-        return obj
-    return Variable(obj)
-
-
-def add(x0: Variable, x1: Variable) -> Variable:
-    x1 = as_array(x1)
-    return Add()(x0, x1)
-
-
-def mul(x0: Variable, x1: Variable) -> Variable:
-    x1 = as_array(x1)
-    return Mul()(x0, x1)
-
-
-def neg(x: Variable) -> Variable:
-    return Neg()(x)
-
-
-def sub(x0: Variable, x1: Variable) -> Variable:
-    x1 = as_array(x1)
-    return Sub()(x0, x1)
-
-
-def rsub(x0: Variable, x1: Variable) -> Variable:
-    x1 = as_array(x1)
-    return Sub()(x1, x0)
-
-
-def div(x0: Variable, x1: Variable) -> Variable:
-    x1 = as_array(x1)
-    return Div()(x0, x1)
-
-
-def rdiv(x0: Variable, x1: Variable) -> Variable:
-    x1 = as_array(x1)
-    return Div()(x1, x0)
-
-
 def pow(x: Variable, c: int) -> Variable:
     return Pow(c)(x)
-
-
-if __name__ == "__main__":
-    x = Variable(np.array(2.0))
-    z = Variable(np.array(1.0))
-    y = x * np.array(3.0)
-
-    print(y)
