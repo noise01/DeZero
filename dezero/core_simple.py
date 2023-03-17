@@ -1,11 +1,13 @@
 from __future__ import annotations
-from typing import Any
 import contextlib
 import weakref
 
 import numpy as np
 
 
+# =============================================================================
+# Config
+# =============================================================================
 class Config:
     enable_backprop = True
 
@@ -24,6 +26,9 @@ def no_grad() -> None:
     return using_config("enable_backprop", False)
 
 
+# =============================================================================
+# Variable, Function
+# =============================================================================
 class Variable:
     __array_priority__ = 200
 
@@ -37,48 +42,6 @@ class Variable:
         self.grad: np.ndarray = None
         self.creator: Function = None
         self.generation = 0
-
-    def set_creator(self, f: Function) -> None:
-        self.creator = f
-        self.generation = f.generation + 1
-
-    def clear_grad(self) -> None:
-        self.grad = None
-
-    def backward(self, retain_grad=False) -> None:
-        if self.grad is None:
-            self.grad = np.ones_like(self.data)
-
-        fs: list[Function] = []
-        seen_set = set()
-
-        def add_f(f: Function) -> None:
-            if f not in seen_set:
-                fs.append(f)
-                seen_set.add(f)
-                fs.sort(key=lambda x: x.generation)
-
-        add_f(self.creator)
-
-        while fs:
-            f = fs.pop()
-            gys = [output().grad for output in f.outputs]
-            gxs = f.backward(*gys)
-            if not isinstance(gxs, tuple):
-                gxs = (gxs,)
-
-            for x, gx in zip(f.inputs, gxs):
-                if x.grad is None:
-                    x.grad = gx
-                else:
-                    x.grad = x.grad + gx
-
-                if x.creator is not None:
-                    add_f(x.creator)
-
-            if not retain_grad:
-                for y in f.outputs:
-                    y().grad = None
 
     @property
     def shape(self) -> tuple:
@@ -135,8 +98,50 @@ class Variable:
     def __pow__(self, other: int) -> Variable:
         return pow(self, other)
 
+    def set_creator(self, f: Function) -> None:
+        self.creator = f
+        self.generation = f.generation + 1
 
-def as_array(x: Any) -> np.ndarray:
+    def clear_grad(self) -> None:
+        self.grad = None
+
+    def backward(self, retain_grad=False) -> None:
+        if self.grad is None:
+            self.grad = np.ones_like(self.data)
+
+        fs: list[Function] = []
+        seen_set = set()
+
+        def add_f(f: Function) -> None:
+            if f not in seen_set:
+                fs.append(f)
+                seen_set.add(f)
+                fs.sort(key=lambda x: x.generation)
+
+        add_f(self.creator)
+
+        while fs:
+            f = fs.pop()
+            gys = [output().grad for output in f.outputs]
+            gxs = f.backward(*gys)
+            if not isinstance(gxs, tuple):
+                gxs = (gxs,)
+
+            for x, gx in zip(f.inputs, gxs):
+                if x.grad is None:
+                    x.grad = gx
+                else:
+                    x.grad = x.grad + gx
+
+                if x.creator is not None:
+                    add_f(x.creator)
+
+            if not retain_grad:
+                for y in f.outputs:
+                    y().grad = None
+
+
+def as_array(x: int | float | np.ndarray) -> np.ndarray:
     if np.isscalar(x):
         return np.array(x)
     return x
@@ -174,6 +179,9 @@ class Function:
         raise NotImplementedError()
 
 
+# =============================================================================
+# Arithmetic operations: Add, Mul, Sub, Div, Neg, Pow
+# =============================================================================
 class Add(Function):
     def forward(self, x0: np.ndarray, x1: np.ndarray) -> np.ndarray:
         return x0 + x1

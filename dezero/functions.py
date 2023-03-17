@@ -2,16 +2,22 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-from dezero import utils
-from dezero.core import Function, as_variable
 
 if TYPE_CHECKING:
     from dezero.core import Variable
+    import cupy as cp
+
+from dezero import utils, cuda
+from dezero.core import Function, as_variable
 
 
+# =============================================================================
+# Basic functions: sin, cos, tanh
+# =============================================================================
 class Sin(Function):
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        return np.sin(x)
+    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray:
+        xp = cuda.get_array_module(x)
+        return xp.sin(x)
 
     def backward(self, gy: Variable) -> Variable:
         (x,) = self.inputs
@@ -23,8 +29,9 @@ def sin(x: Variable) -> Variable:
 
 
 class Cos(Function):
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        return np.cos(x)
+    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
+        xp = cuda.get_array_module(x)
+        return xp.cos(x)
 
     def backward(self, gy: Variable) -> Variable:
         (x,) = self.inputs
@@ -36,8 +43,9 @@ def cos(x: Variable) -> Variable:
 
 
 class Tanh(Function):
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        return np.tanh(x)
+    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
+        xp = cuda.get_array_module(x)
+        return xp.tanh(x)
 
     def backward(self, gy: Variable) -> Variable:
         y = self.outputs[0]()
@@ -49,8 +57,9 @@ def tanh(x: Variable) -> Variable:
 
 
 class Exp(Function):
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        return np.exp(x)
+    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
+        xp = cuda.get_array_module(x)
+        return xp.exp(x)
 
     def backward(self, gy: Variable) -> Variable:
         y = self.outputs[0]()
@@ -61,11 +70,14 @@ def exp(x: Variable) -> Variable:
     return Exp()(x)
 
 
+# =============================================================================
+# Tensor operations: reshape, transpose, get_item
+# =============================================================================
 class Reshape(Function):
-    def __init__(self, shape: tuple) -> None:
+    def __init__(self, shape: tuple[int]) -> None:
         self.shape = shape
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
         self.x_shape = x.shape
         return x.reshape(self.shape)
 
@@ -73,7 +85,7 @@ class Reshape(Function):
         return reshape(gy, self.x_shape)
 
 
-def reshape(x: Variable, shape: tuple) -> Variable:
+def reshape(x: Variable, shape: tuple[int]) -> Variable:
     if x.shape == shape:
         return as_variable(x)
     return Reshape(shape)(x)
@@ -97,6 +109,28 @@ class Transpose(Function):
 
 def transpose(x: Variable, axes: tuple[int] = None) -> Variable:
     return Transpose(axes)(x)
+
+
+class GetItem(Function):
+    def __init__(self, slices) -> None:
+        self.slices = slices
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        return x[self.slices]
+
+    def backward(self, gy: Variable) -> Variable:
+        (x,) = self.inputs
+        f = GetItemGrad(self.slices, x.shape)
+        return f(gy)
+
+
+class GetItemGrad(Function):
+    def __init__(self, slices, in_shape: tuple[int]) -> None:
+        self.slices = slices
+        self.in_shape = in_shape
+
+    def forward(self, gy: Variable) -> Variable:
+        pass
 
 
 class Sum(Function):
@@ -183,11 +217,11 @@ class Linear(Function):
         return gx, gW, gb
 
 
-def linear(x: Variable, W: Variable, b: Variable = None):
+def linear(x: Variable, W: Variable, b: Variable = None) -> Variable:
     return Linear()(x, W, b)
 
 
-def linear_simple(x: Variable, W: Variable, b: Variable = None):
+def linear_simple(x: Variable, W: Variable, b: Variable = None) -> Variable:
     x, W = as_variable(x), as_variable(W)
     t = matmul(x, W)
     if b is None:

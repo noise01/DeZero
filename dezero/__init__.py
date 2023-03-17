@@ -16,7 +16,11 @@ else:
     from dezero.core import no_grad
     from dezero.core import as_array
     from dezero.core import as_variable
+    from dezero.layers import Layer
+    from dezero.models import Model
 
     import dezero.functions
+    import dezero.layers
+    import dezero.optimizers
     import dezero.utils
-    
+    import dezero.cuda

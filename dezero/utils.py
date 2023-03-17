@@ -8,7 +8,7 @@ import numpy as np
 from dezero import Variable
 
 if TYPE_CHECKING:
-    from core_simple import Variable, Function
+    from dezero import Function
 
 
 def _dot_var(v: Variable, verbose=False) -> str:
@@ -36,7 +36,7 @@ def _dot_f(f: Function) -> str:
     return txt
 
 
-def get_dot_graph(output: Variable, verbose=False):
+def get_dot_graph(output: Variable, verbose=False) -> str:
     txt = ""
     fs: list[Function] = []
     seen_set = set()
