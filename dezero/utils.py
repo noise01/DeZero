@@ -5,7 +5,7 @@ import subprocess
 
 import numpy as np
 
-from dezero import Variable
+from dezero import Variable, cuda
 
 if TYPE_CHECKING:
     from dezero import Function
@@ -109,3 +109,14 @@ def reshape_sum_backward(
 
     gy = gy.reshape(shape)
     return gy
+
+
+def logsumexp(x: np.ndarray, axis=1) -> np.ndarray:
+    xp = cuda.get_array_module(x)
+    m = x.max(axis=axis, keepdims=True)
+    y = x - m
+    xp.exp(y, out=y)
+    s = y.sum(axis=axis, keepdims=True)
+    xp.log(s, out=s)
+    m += s
+    return m

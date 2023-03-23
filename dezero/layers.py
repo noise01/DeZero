@@ -6,6 +6,7 @@ import numpy as np
 
 from dezero.core import Parameter
 import dezero.functions as F
+from dezero import cuda
 
 if TYPE_CHECKING:
     from dezero.core import Variable
@@ -70,15 +71,16 @@ class Linear(Layer):
         else:
             self.b = Parameter(np.zeros(out_size, dtype=dtype), name="b")
 
-    def _init_W(self) -> None:
-        W_data = np.random.randn(self.in_size, self.out_size).astype(
+    def _init_W(self, xp=np) -> None:
+        W_data = xp.random.randn(self.in_size, self.out_size).astype(
             self.dtype
-        ) * np.sqrt(1 / self.in_size)
+        ) * xp.sqrt(1 / self.in_size)
         self.W.data = W_data
 
     def forward(self, x: Variable) -> Variable:
         if self.W.data is None:
             self.in_size = x.shape[1]
-            self._init_W()
+            xp = cuda.get_array_module(x)
+            self._init_W(xp)
 
         return F.linear(x, self.W, self.b)

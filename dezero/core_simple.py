@@ -44,7 +44,7 @@ class Variable:
         self.generation = 0
 
     @property
-    def shape(self) -> tuple:
+    def shape(self) -> tuple[int]:
         return self.data.shape
 
     @property
@@ -95,7 +95,7 @@ class Variable:
     def __rtruediv__(self, other: Variable) -> Variable:
         return rdiv(self, other)
 
-    def __pow__(self, other: int) -> Variable:
+    def __pow__(self, other: float) -> Variable:
         return pow(self, other)
 
     def set_creator(self, f: Function) -> None:
@@ -119,7 +119,6 @@ class Variable:
                 fs.sort(key=lambda x: x.generation)
 
         add_f(self.creator)
-
         while fs:
             f = fs.pop()
             gys = [output().grad for output in f.outputs]
@@ -141,16 +140,16 @@ class Variable:
                     y().grad = None
 
 
-def as_array(x: int | float | np.ndarray) -> np.ndarray:
-    if np.isscalar(x):
-        return np.array(x)
-    return x
-
-
 def as_variable(obj: Variable | np.ndarray) -> Variable:
     if isinstance(obj, Variable):
         return obj
     return Variable(obj)
+
+
+def as_array(x: int | float | np.ndarray) -> np.ndarray:
+    if np.isscalar(x):
+        return np.array(x)
+    return x
 
 
 class Function:
@@ -273,5 +272,5 @@ class Pow(Function):
         return gy * c * x ** (c - 1)
 
 
-def pow(x: Variable, c: int) -> Variable:
+def pow(x: Variable, c: float) -> Variable:
     return Pow(c)(x)

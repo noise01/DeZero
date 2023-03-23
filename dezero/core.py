@@ -29,7 +29,7 @@ def using_config(name: str, value: bool) -> None:
         setattr(Config, name, old_value)
 
 
-def no_grad():
+def no_grad() -> None:
     return using_config("enable_backprop", False)
 
 
@@ -59,7 +59,7 @@ class Variable:
         self.generation = 0
 
     @property
-    def shape(self) -> tuple:
+    def shape(self) -> tuple[int]:
         return self.data.shape
 
     @property
@@ -110,8 +110,11 @@ class Variable:
     def __rtruediv__(self, other: Variable) -> Variable:
         return rdiv(self, other)
 
-    def __pow__(self, other: int) -> Variable:
+    def __pow__(self, other: float) -> Variable:
         return pow(self, other)
+
+    def __getitem__(self, item: slice) -> Variable:
+        return dezero.functions.get_item(self, item)
 
     def set_creator(self, f: Function) -> None:
         self.creator = f
@@ -135,7 +138,6 @@ class Variable:
                 fs.sort(key=lambda x: x.generation)
 
         add_f(self.creator)
-
         while fs:
             f = fs.pop()
             gys = [output().grad for output in f.outputs]
@@ -158,7 +160,7 @@ class Variable:
                     for y in f.outputs:
                         y().grad = None
 
-    def reshape(self, *shape: tuple[int]) -> Variable:
+    def reshape(self, *shape: tuple[int] | int) -> Variable:
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
             shape = shape[0]
         return dezero.functions.reshape(self, shape)

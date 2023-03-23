@@ -5,17 +5,16 @@ import numpy as np
 
 if TYPE_CHECKING:
     from dezero.core import Variable
-    import cupy as cp
 
 from dezero import utils, cuda
 from dezero.core import Function, as_variable
 
 
 # =============================================================================
-# Basic functions: sin, cos, tanh
+# Basic functions: sin, cos, tanh, exp, log
 # =============================================================================
 class Sin(Function):
-    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray:
+    def forward(self, x: np.ndarray) -> np.ndarray:
         xp = cuda.get_array_module(x)
         return xp.sin(x)
 
@@ -29,7 +28,7 @@ def sin(x: Variable) -> Variable:
 
 
 class Cos(Function):
-    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
+    def forward(self, x: np.ndarray) -> np.ndarray:
         xp = cuda.get_array_module(x)
         return xp.cos(x)
 
@@ -43,7 +42,7 @@ def cos(x: Variable) -> Variable:
 
 
 class Tanh(Function):
-    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
+    def forward(self, x: np.ndarray) -> np.ndarray:
         xp = cuda.get_array_module(x)
         return xp.tanh(x)
 
@@ -57,7 +56,7 @@ def tanh(x: Variable) -> Variable:
 
 
 class Exp(Function):
-    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
+    def forward(self, x: np.ndarray) -> np.ndarray:
         xp = cuda.get_array_module(x)
         return xp.exp(x)
 
@@ -70,6 +69,20 @@ def exp(x: Variable) -> Variable:
     return Exp()(x)
 
 
+class Log(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        xp = cuda.get_array_module(x)
+        return xp.log(x)
+
+    def backward(self, gy: Variable) -> Variable:
+        (x,) = self.inputs
+        return gy / x
+
+
+def log(x: Variable) -> Variable:
+    return Log()(x)
+
+
 # =============================================================================
 # Tensor operations: reshape, transpose, get_item
 # =============================================================================
@@ -77,7 +90,7 @@ class Reshape(Function):
     def __init__(self, shape: tuple[int]) -> None:
         self.shape = shape
 
-    def forward(self, x: np.ndarray | cp.ndarray) -> np.ndarray | cp.ndarray:
+    def forward(self, x: np.ndarray) -> np.ndarray:
         self.x_shape = x.shape
         return x.reshape(self.shape)
 
@@ -96,7 +109,7 @@ class Transpose(Function):
         self.axes = axes
 
     def forward(self, x: np.ndarray) -> np.ndarray:
-        return np.transpose(x, self.axes)
+        return x.reshape(self.axes)
 
     def backward(self, gy: Variable) -> Variable:
         if self.axes is None:
@@ -125,14 +138,32 @@ class GetItem(Function):
 
 
 class GetItemGrad(Function):
-    def __init__(self, slices, in_shape: tuple[int]) -> None:
+    def __init__(self, slices: np.ndarray, in_shape: tuple[int]) -> None:
         self.slices = slices
         self.in_shape = in_shape
 
     def forward(self, gy: Variable) -> Variable:
-        pass
+        xp = cuda.get_array_module(gy)
+        gx = xp.zeros(self.in_shape, dtype=gy.dtype)
+
+        if xp is np:
+            np.add.at(gx, self.slices, gy)
+        else:
+            cuda.scatter_add(gx, self.slices, gy)
+        return gx
+
+    def backward(self, ggx: Variable) -> Variable:
+        return get_item(ggx, self.slices)
 
 
+def get_item(x: Variable, slices: np.ndarray) -> Variable:
+    f = GetItem(slices)
+    return f(x)
+
+
+# =============================================================================
+# sum, sum_to, broadcast_to, average, matmul, linear
+# =============================================================================
 class Sum(Function):
     def __init__(self, axis: int, keepdims: bool) -> None:
         self.axis = axis
@@ -149,24 +180,6 @@ class Sum(Function):
 
 def sum(x: Variable, axis: int = None, keepdims=False) -> Variable:
     return Sum(axis, keepdims)(x)
-
-
-class BroadcastTo(Function):
-    def __init__(self, shape: tuple[int]) -> None:
-        self.shape = shape
-
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        self.x_shape = x.shape
-        return np.broadcast_to(x, self.shape)
-
-    def backward(self, gy: Variable) -> Variable:
-        return sum_to(gy, self.x_shape)
-
-
-def broadcast_to(x: Variable, shape: tuple[int]) -> Variable:
-    if x.shape == shape:
-        return as_variable(x)
-    return BroadcastTo(shape)(x)
 
 
 class SumTo(Function):
@@ -187,6 +200,25 @@ def sum_to(x: Variable, shape: tuple[int]) -> Variable:
     return SumTo(shape)(x)
 
 
+class BroadcastTo(Function):
+    def __init__(self, shape: tuple[int]) -> None:
+        self.shape = shape
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        self.x_shape = x.shape
+        xp = cuda.get_array_module(x)
+        return xp.broadcast_to(x, self.shape)
+
+    def backward(self, gy: Variable) -> Variable:
+        return sum_to(gy, self.x_shape)
+
+
+def broadcast_to(x: Variable, shape: tuple[int]) -> Variable:
+    if x.shape == shape:
+        return as_variable(x)
+    return BroadcastTo(shape)(x)
+
+
 class MatMul(Function):
     def forward(self, x: np.ndarray, W: np.ndarray) -> np.ndarray:
         return x.dot(W)
@@ -200,6 +232,17 @@ class MatMul(Function):
 
 def matmul(x: Variable, W: Variable) -> Variable:
     return MatMul()(x, W)
+
+
+def linear_simple(x: Variable, W: Variable, b: Variable = None) -> Variable:
+    x, W = as_variable(x), as_variable(W)
+    t = matmul(x, W)
+    if b is None:
+        return t
+
+    y = t + b
+    t.data = None
+    return y
 
 
 class Linear(Function):
@@ -221,21 +264,18 @@ def linear(x: Variable, W: Variable, b: Variable = None) -> Variable:
     return Linear()(x, W, b)
 
 
-def linear_simple(x: Variable, W: Variable, b: Variable = None) -> Variable:
-    x, W = as_variable(x), as_variable(W)
-    t = matmul(x, W)
-    if b is None:
-        return t
-
-    y = t + b
-    t.data = None
-    return y
+# =============================================================================
+# Activation functions: sigmoid, softmax
+# =============================================================================
+def sigmoid_simple(x: Variable) -> Variable:
+    x = as_variable(x)
+    return 1 / (1 + exp(-x))
 
 
 class Sigmoid(Function):
     def forward(self, x: np.ndarray) -> np.ndarray:
-        x = as_variable(x)
-        return 1 / (1 + exp(-x))
+        xp = cuda.get_array_module(x)
+        return xp.tanh(x + 0.5) * 0.5 + 0.5
 
     def backward(self, gy: Variable) -> Variable:
         y = self.outputs[0]()
@@ -246,9 +286,44 @@ def sigmoid(x: Variable) -> Variable:
     return Sigmoid()(x)
 
 
-def sigmoid_simple(x: Variable) -> Variable:
+# ToDo: overflow
+def softmax_simple(x: Variable, axis=1) -> Variable:
     x = as_variable(x)
-    return 1 / (1 + exp(-x))
+    y = exp(x)
+    sum_y = sum(y, axis=axis, keepdims=True)
+    return y / sum_y
+
+
+class Softmax(Function):
+    def __init__(self, axis=1) -> None:
+        self.axis = axis
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        xp = cuda.get_array_module(x)
+        y = x - x.max(axis=self.axis, keepdims=True)
+        y: np.ndarray = xp.exp(y)
+        y /= y.sum(axis=self.axis, keepdims=True)
+        return y
+
+    def backward(self, gy: Variable) -> Variable:
+        y: Variable = self.outputs[0]()
+        gx = y * gy
+        sumdx = gx.sum(axis=self.axis, keepdims=True)
+        gx -= y * sumdx
+        return gx
+
+
+def softmax(x: Variable, axis=1):
+    return Softmax(axis)(x)
+
+
+# =============================================================================
+# Loss functions: mean_squared_error, softmax_cross_entropy_simple
+# =============================================================================
+def mean_squared_error_simple(x0: Variable, x1: Variable) -> Variable:
+    x0, x1 = as_variable(x0), as_variable(x1)
+    diff = x0 - x1
+    return sum(diff**2) / len(diff)
 
 
 class MeanSquaredError(Function):
@@ -269,7 +344,56 @@ def mean_squared_error(x0: Variable, x1: Variable) -> Variable:
     return MeanSquaredError()(x0, x1)
 
 
-def mean_squared_error_simple(x0: Variable, x1: Variable) -> Variable:
-    x0, x1 = as_variable(x0), as_variable(x1)
-    diff = x0 - x1
-    return sum(diff**2) / len(diff)
+def softmax_cross_entropy_simple(x: Variable, t: Variable) -> Variable:
+    x, t = as_variable(x), as_variable(t)
+    N = x.shape[0]
+    p = softmax(x)
+    p = clip(p, 1e-15, 1.0)
+    log_p = log(p)
+    tlog_p = log_p[np.arange(N), t.data]
+    return -1 * sum(tlog_p) / N
+
+
+class SoftmaxCrossEntropy(Function):
+    def forward(self, x: np.ndarray, t: np.ndarray) -> np.ndarray:
+        N = x.shape[0]
+        log_z = utils.logsumexp(x, axis=1)
+        log_p = x - log_z
+        log_p: np.ndarray = log_p[np.arange(N), t.ravel()]
+        return -log_p.sum() / np.float32(N)
+
+    def backward(self, gy: Variable) -> Variable:
+        x, t = self.inputs
+        N, CLS_NUM = x.shape
+
+        gy *= 1 / N
+        y = softmax(x)
+        xp = cuda.get_array_module(t.data)
+        t_onehot = xp.eye(CLS_NUM, dtype=t.dtype)[t.data]
+        return gy * (y - t_onehot)
+
+
+def softmx_cross_entropy(x: Variable, t: Variable) -> Variable:
+    return SoftmaxCrossEntropy()(x, t)
+
+
+# =============================================================================
+# max / min / clip
+# =============================================================================
+class Clip(Function):
+    def __init__(self, x_min: float, x_max: float) -> None:
+        self.x_min = x_min
+        self.x_max = x_max
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        xp = cuda.get_array_module(x)
+        return xp.clip(x, self.x_min, self.x_max)
+
+    def backward(self, gy: Variable) -> Variable:
+        (x,) = self.inputs
+        mask = (x.data >= self.x_min) * (x.data <= self.x_max)
+        return gy * mask
+
+
+def clip(x: Variable, x_min: float, x_max: float) -> Variable:
+    return Clip(x_min, x_max)(x)

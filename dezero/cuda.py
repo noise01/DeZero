@@ -3,6 +3,7 @@ import numpy as np
 
 try:
     import cupy as cp
+    import cupyx as cpx
 
     cupy = cp
 except ImportError:
@@ -38,3 +39,7 @@ def as_cupy(x: Variable | np.ndarray | cp.ndarray) -> cp.ndarray:
     if not gpu_enable:
         raise Exception("CuPy cannot be loaded. Install CuPy!")
     return cp.asarray(x)
+
+
+def scatter_add(a: cp.ndarray, slices: cp.ndarray, value: cp.ndarray) -> None:
+    return cpx.scatter_add(a, slices, value)
